@@ -1,9 +1,14 @@
 import streamlit as st
 import streamlit.components.v1 as components
-from problem_generator import KSATMathGenerator
-from pdf_generator import KSATPDFGenerator
-from latex_renderer import LaTeXRenderer
-from config import MATH_TOPICS, PROBLEM_TYPES
+import sys
+import os
+# 상위 디렉토리를 Python 경로에 추가
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from core.problem_generator import KSATMathGenerator
+from generators.pdf_generator import KSATPDFGenerator
+from generators.latex_renderer import LaTeXRenderer
+from core.config import MATH_TOPICS, PROBLEM_TYPES
 import json
 import pandas as pd
 from datetime import datetime
@@ -104,16 +109,18 @@ def main():
         
         mode = st.radio("모드 선택", ["단일 문제 생성", "모의고사 생성"])
         
-        exam_type = st.selectbox("시험 유형", ["가형", "나형"])
-        
         if mode == "단일 문제 생성":
             problem_type = st.selectbox("문제 유형", ["선택형", "단답형"])
             
-            topic = st.selectbox("주제", ["자동 선택"] + MATH_TOPICS[exam_type])
+            topic = st.selectbox("주제", ["자동 선택"] + MATH_TOPICS)
             if topic == "자동 선택":
                 topic = None
             
-            difficulty = st.selectbox("난이도", ["하", "중", "상"])
+            difficulty = st.selectbox(
+                "난이도", 
+                ["하", "중", "상", "킬러"],
+                help="킬러: 초고난도 문항 (항등식, 다단원 융합, 부등식 활용)"
+            )
             
             points = st.selectbox("배점", 
                                 [2, 3, 4] if problem_type == "선택형" else [3, 4])
@@ -121,7 +128,6 @@ def main():
             if st.button("🚀 문제 생성", type="primary"):
                 with st.spinner("문제를 생성하는 중..."):
                     problem = generator.generate_problem(
-                        exam_type=exam_type,
                         problem_type=problem_type,
                         topic=topic,
                         difficulty=difficulty,
@@ -134,11 +140,17 @@ def main():
         else:  
             num_problems = st.slider("문제 수", 10, 30, 20)
             
+            include_killer = st.checkbox(
+                "킬러 문제 포함", 
+                value=False,
+                help="초고난도 킬러 문항 1-2개를 포함합니다"
+            )
+            
             if st.button("📝 모의고사 생성", type="primary"):
                 with st.spinner(f"{num_problems}개의 문제를 생성하는 중..."):
                     problems = generator.generate_exam_set(
-                        exam_type=exam_type,
-                        num_problems=num_problems
+                        num_problems=num_problems,
+                        include_killer=include_killer
                     )
                     # 모든 문제에 LaTeX 렌더링 적용
                     problems = [latex_renderer.process_problem_text(p) for p in problems]
@@ -171,16 +183,31 @@ def main():
                 
                 if problem.get('choices'):
                     st.markdown("**선택지:**")
-                    for i, choice in enumerate(problem.get('choices', []), 1):
-                        # 선택지도 LaTeX 렌더링
-                        st.markdown(f"{i}. {choice}")
+                    # 선택지를 2열로 표시하여 가독성 향상
+                    col1_choices, col2_choices = st.columns(2)
+                    choices = problem.get('choices', [])
+                    
+                    for i, choice in enumerate(choices, 1):
+                        # 선택지 번호와 값을 명확히 표시
+                        circle_nums = ["①", "②", "③", "④", "⑤"]
+                        choice_text = f"**{circle_nums[i-1]}** {choice}"
+                        if i <= 3:
+                            col1_choices.markdown(choice_text)
+                        else:
+                            col2_choices.markdown(choice_text)
             
             with col2:
                 st.subheader("💡 정답 및 풀이")
                 
                 with st.expander("정답 보기"):
                     answer_text = problem.get('answer', 'N/A')
-                    st.success(f"**정답:** {answer_text}")
+                    # 선택형인 경우 선택지 번호도 함께 표시
+                    if problem.get('choices') and answer_text in problem['choices']:
+                        circle_nums = ["①", "②", "③", "④", "⑤"]
+                        idx = problem['choices'].index(answer_text)
+                        st.success(f"**정답:** {circle_nums[idx]} {answer_text}")
+                    else:
+                        st.success(f"**정답:** {answer_text}")
                 
                 with st.expander("풀이 보기"):
                     solution_text = problem.get('solution', '풀이를 불러올 수 없습니다.')
@@ -190,6 +217,16 @@ def main():
                     with st.expander("핵심 개념"):
                         for concept in problem.get('key_concepts', []):
                             st.markdown(f"- {concept}")
+                
+                # 추가 품질 정보 표시
+                if problem.get('difficulty_rationale'):
+                    with st.expander("난이도 설정 근거"):
+                        st.markdown(problem['difficulty_rationale'])
+                
+                if problem.get('common_mistakes'):
+                    with st.expander("자주 하는 실수"):
+                        for mistake in problem.get('common_mistakes', []):
+                            st.markdown(f"⚠️ {mistake}")
             
             st.divider()
             
@@ -229,8 +266,9 @@ def main():
                     
                     if problem.get('choices'):
                         st.markdown("**선택지:**")
-                        for j, choice in enumerate(problem.get('choices', []), 1):
-                            st.markdown(f"{j}. {choice}")
+                        circle_nums = ["①", "②", "③", "④", "⑤"]
+                        choices_text = " ".join([f"{circle_nums[j]} {choice}" for j, choice in enumerate(problem.get('choices', []))])
+                        st.markdown(choices_text)
                     
                     answer_text = problem.get('answer', 'N/A')
                     st.info(f"정답: {answer_text}")
@@ -253,8 +291,9 @@ def main():
             
             if selected.get('choices'):
                 st.markdown("**선택지:**")
+                circle_nums = ["①", "②", "③", "④", "⑤"]
                 for i, choice in enumerate(selected.get('choices', []), 1):
-                    st.markdown(f"{i}. {choice}")
+                    st.markdown(f"{circle_nums[i-1]} {choice}")
             
             with st.expander("정답 및 풀이"):
                 answer_text = selected.get('answer', 'N/A')
@@ -316,7 +355,6 @@ def main():
                         exam_info = {
                             "title": "대학수학능력시험 모의고사",
                             "subject": "수학 영역",
-                            "exam_type": exam_type,
                             "date": datetime.now().strftime("%Y년 %m월 %d일"),
                             "time": "100분",
                             "total_questions": len(problems)

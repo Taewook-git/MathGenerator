@@ -138,9 +138,21 @@ class LaTeXRenderer:
             # 적분 기호 개선: ∫ → $\int$
             part = re.sub(r'∫', r'$\\int$', part)
             
-            # 극한 표현 개선: lim_{x→a} → $\lim_{x \to a}$
-            part = re.sub(r'lim_?\{?([^}→]+)→([^}]+)\}?', r'$\\lim_{\1 \\to \2}$', part)
-            part = re.sub(r'\blim\b', r'$\\lim$', part)
+            # 극한 표현 처리 (무한대 기호 처리 포함)
+            # lim(x→∞) 형태 - 무한대를 먼저 처리
+            part = re.sub(r'lim\(([^)→]+)→∞\)', r'$\\lim_{\1 \\to \\infty}$', part)
+            part = re.sub(r'lim\[([^\]→]+)→∞\]', r'$\\lim_{\1 \\to \\infty}$', part)
+            
+            # 일반적인 lim(x→a) 형태
+            part = re.sub(r'lim\(([^)→]+)→([^)]+)\)', r'$\\lim_{\1 \\to \2}$', part)
+            # lim[x→a] 형태  
+            part = re.sub(r'lim\[([^\]→]+)→([^\]]+)\]', r'$\\lim_{\1 \\to \2}$', part)
+            # lim_{x→a} 형태 (기존 LaTeX 형태)
+            part = re.sub(r'lim_\{([^}→]+)→([^}]+)\}', r'$\\lim_{\1 \\to \2}$', part)
+            # lim x→a 형태 (공백으로 구분) - 보수적으로 적용
+            part = re.sub(r'\blim\s+([a-zA-Z]+)\s*→\s*([^\s\)]+)', r'$\\lim_{\1 \\to \2}$', part)
+            # 단순 lim만 있는 경우
+            part = re.sub(r'\blim\b(?!\s*[\(\[\{_→])', r'$\\lim$', part)
             
             # 합/곱 기호: ∑, ∏ → $\sum$, $\prod$
             part = re.sub(r'∑', r'$\\sum$', part)

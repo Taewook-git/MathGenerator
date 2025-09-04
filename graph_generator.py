@@ -11,21 +11,30 @@ import platform
 def setup_korean_font():
     system = platform.system()
     
+    # 사용 가능한 모든 폰트 이름 가져오기
+    available_fonts = set([f.name for f in font_manager.fontManager.ttflist])
+    
     if system == 'Darwin':  # macOS
         # 수능 스타일에 가까운 폰트 우선순위
         font_candidates = [
             'AppleSDGothicNeo',  # Apple SD Gothic Neo (수능과 유사)
+            'Apple SD Gothic Neo',  # 다른 표기
             'AppleGothic',
+            'Apple Gothic',
             'AppleMyungjo',
+            'Nanum Gothic',
             'NanumGothic',
-            'Malgun Gothic'
+            'Malgun Gothic',
+            'Arial Unicode MS',  # macOS의 대체 유니코드 폰트
+            'Helvetica'
         ]
     elif system == 'Windows':
         font_candidates = [
             'Malgun Gothic',
             'NanumGothic',
             'Gulim',
-            'Batang'
+            'Batang',
+            'Arial Unicode MS'
         ]
     else:  # Linux
         font_candidates = [
@@ -37,16 +46,19 @@ def setup_korean_font():
     
     # 사용 가능한 폰트 찾기
     for font_name in font_candidates:
-        try:
-            font_manager.FontProperties(family=font_name)
+        if font_name in available_fonts:
             return font_name
-        except:
-            continue
     
-    return 'DejaVu Sans'  # 폴백
+    # 한글을 지원하는 폰트 찾기 (폴백)
+    for font in available_fonts:
+        if 'Gothic' in font or 'Nanum' in font or 'Malgun' in font:
+            return font
+    
+    return 'DejaVu Sans'  # 최종 폴백
 
 # 한글 폰트 설정
 korean_font = setup_korean_font()
+print(f"Using font: {korean_font}")  # 디버그용
 plt.rcParams['font.family'] = korean_font
 plt.rcParams['axes.unicode_minus'] = False
 

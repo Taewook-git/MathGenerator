@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-킬러 문제 생성 및 SymPy 파싱 오류 수정 테스트
+울트라 하드 문제 생성 및 SymPy 파싱 오류 수정 테스트
 """
 
 import sys

@@ -21,7 +21,7 @@ class KSATPDFGenerator:
             exam_info = {
                 "title": "대학수학능력시험 모의고사",
                 "subject": "수학 영역",
-                "exam_type": "가형",
+                "exam_type": "공통+선택",  # 2015 개정 교육과정 체제
                 "date": datetime.now().strftime("%Y년 %m월 %d일"),
                 "time": "100분",
                 "total_questions": len(problems)

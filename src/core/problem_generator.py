@@ -114,7 +114,7 @@ class KSATMathGenerator:
                         # quota 초과 에러인 경우
                         if not self.use_fallback and attempt == 0:
                             # 첫 번째 시도에서 실패하면 fallback 모델로 전환
-                            print("gemini-2.5-pro 할당량 초과. gemini-1.5-flash로 전환...")
+                            print("gemini-2.5-pro 할당량 초과. gemini-2.5-flash로 전환...")
                             self.use_fallback = True
                             self.min_request_interval = 5  # flash는 더 관대함
                             continue
@@ -247,7 +247,7 @@ class KSATMathGenerator:
 - 조건의 변화에 따른 결과 분석
 - 최소값, 최댓값, 존재성 등 심화 주제
 - 역사고력 필요 (결과로부터 조건 추론)
-- 한국 고등학교 교육과정 내에서 최고 난이도"""
+- 한국 교육과정 내에서 최고 난이도"""
         }
         
         # 특별 주제 지침 추가
@@ -428,7 +428,7 @@ class KSATMathGenerator:
 - 역함수, 합성함수, 매개변수 함수
 - 벡터의 내적, 외적 활용
 - 정적분과 미분의 고급 활용
-- 한국 고등학교 교육과정 내에서 가장 어려운 수준
+- 한국 교육과정 내에서 가장 어려운 수준
 """
         elif difficulty == "중" and points >= 4:
             base_prompt += """\n

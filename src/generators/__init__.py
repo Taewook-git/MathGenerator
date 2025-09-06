@@ -1,5 +1,5 @@
 """
-생성기 모듈 - 그래프, LaTeX, PDF, 킬러 문제
+생성기 모듈 - 그래프, LaTeX, PDF, 울트라 하드 문제
 """
 
 from .graph_generator import MathGraphGenerator

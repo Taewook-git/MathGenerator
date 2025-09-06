@@ -388,9 +388,9 @@ class UltraHardProblemGenerator:
         
         # 최종 난이도 등급
         if analysis["base_score"] >= 100:
-            analysis["grade"] = "킬러(Killer)"
+            analysis["grade"] = "울트라하드(Ultra Hard)"
         elif analysis["base_score"] >= 90:
-            analysis["grade"] = "준킬러(Semi-Killer)"
+            analysis["grade"] = "준-울트라하드(Semi-Ultra Hard)"
         else:
             analysis["grade"] = "최상"
         

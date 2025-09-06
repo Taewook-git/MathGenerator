@@ -7,11 +7,11 @@ __author__ = "KSAT Math AI Team"
 
 # 주요 모듈 임포트
 from .core.problem_generator import KSATMathGenerator
-from .validators.quality_validator import QualityEnhancementSystem
+from .validators.quality_validator import QualityEnhancedGenerator
 from .generators.ultra_hard_problems import UltraHardProblemGenerator
 
 __all__ = [
     'KSATMathGenerator',
-    'QualityEnhancementSystem', 
+    'QualityEnhancedGenerator', 
     'UltraHardProblemGenerator'
 ]

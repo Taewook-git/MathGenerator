@@ -2,17 +2,27 @@ import streamlit as st
 import streamlit.components.v1 as components
 import sys
 import os
-# 상위 디렉토리를 Python 경로에 추가
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from core.problem_generator import KSATMathGenerator
-from generators.pdf_generator import KSATPDFGenerator
-from generators.latex_renderer import LaTeXRenderer
-from core.config import MATH_TOPICS, PROBLEM_TYPES
+from pathlib import Path
 import json
 import pandas as pd
 from datetime import datetime
 import base64
+from typing import Dict, Any, List, Optional
+
+# 프로젝트 루트를 Python 경로에 추가
+sys.path.append(str(Path(__file__).parent.parent.parent))
+
+from src.retriever import ProblemSearcher
+from src.generator import ProblemGenerator
+from src.solver import GemmaSolver, SolutionFormatter
+from src.utils.pdf_generator import PDFGenerator
+from src.utils.config import Config
+from src.core.config import MATH_TOPICS, PROBLEM_TYPES
+from src.core.curriculum_2015 import CURRICULUM_2015, get_curriculum_info, PROBLEM_GUIDELINES
+from src.generator.problem_generator_2015 import ProblemGenerator2015
+from src.generator.ultra_hard_generator import UltraHardGenerator
+from src.generator.gemini_client_v2 import GeminiClientV2
+from src.generators.latex_renderer import LaTeXRenderer
 
 st.set_page_config(
     page_title="수능 수학 문제 생성기",
@@ -22,19 +32,75 @@ st.set_page_config(
 
 @st.cache_resource
 def init_generator():
-    return KSATMathGenerator()
+    """문제 생성기 초기화"""
+    try:
+        return ProblemGenerator()
+    except Exception as e:
+        st.error(f"Generator 초기화 실패: {e}")
+        return None
+
+@st.cache_resource
+def init_2015_generator():
+    """2015 개정 교육과정 문제 생성기 초기화"""
+    try:
+        client = GeminiClientV2(use_safety_filter=False)
+        return ProblemGenerator2015(gemini_client=client)
+    except Exception as e:
+        st.error(f"2015 Generator 초기화 실패: {e}")
+        return None
+
+@st.cache_resource
+def init_ultra_hard_generator():
+    """울트라 하드 문항 생성기 초기화"""
+    try:
+        client = GeminiClientV2(use_safety_filter=False)
+        # 연결 테스트
+        success, msg = client.test_connection()
+        if not success:
+            st.warning(f"⚠️ API 연결 문제: {msg}")
+        return UltraHardGenerator(gemini_client=client)
+    except Exception as e:
+        st.error(f"Ultra Hard Generator 초기화 실패: {e}")
+        return None
 
 @st.cache_resource
 def init_pdf_generator():
-    return KSATPDFGenerator()
+    """PDF 생성기 초기화"""
+    try:
+        return PDFGenerator()
+    except:
+        from generators.pdf_generator import KSATPDFGenerator
+        return KSATPDFGenerator()
+
+@st.cache_resource
+def init_searcher():
+    """검색 모듈 초기화"""
+    try:
+        index_path = os.getenv("INDEX_PATH", "data/index")
+        if Path(index_path).exists():
+            return ProblemSearcher(index_path=index_path)
+    except Exception as e:
+        st.warning(f"검색 모듈 초기화 실패: {e}")
+    return None
 
 @st.cache_resource
 def init_latex_renderer():
+    """LaTeX 렌더러 초기화"""
     return LaTeXRenderer()
+
+@st.cache_resource  
+def init_solver():
+    """풀이 모듈 초기화"""
+    try:
+        return GemmaSolver()
+    except Exception as e:
+        st.warning(f"Solver 초기화 실패: {e}")
+    return None
 
 def main():
     st.title("🎓 대학수학능력시험 수학 문제 생성기")
-    st.markdown("Gemini AI를 활용한 수능 수학 문제 자동 생성 시스템")
+    st.markdown("2015 개정 교육과정 기반 AI 문제 생성 시스템")
+    st.info("📌 **모든 문제는 2015 개정 교육과정 범위 내에서만 출제됩니다**")
     
     # MathJax 스크립트 삽입 (수능 스타일)
     components.html("""
@@ -101,62 +167,217 @@ def main():
     """, height=0)
     
     generator = init_generator()
+    generator_2015 = init_2015_generator()
+    ultra_hard_generator = init_ultra_hard_generator()
     pdf_generator = init_pdf_generator()
     latex_renderer = init_latex_renderer()
     
     with st.sidebar:
         st.header("⚙️ 문제 설정")
         
-        mode = st.radio("모드 선택", ["단일 문제 생성", "모의고사 생성"])
+        mode = st.radio(
+            "모드 선택", 
+            ["단일 문제 생성", "울트라 하드 문항 생성", "모의고사 생성"],
+            help="울트라 하드 문항: 2015 개정 교육과정 내 최고 난도 문제"
+        )
         
-        if mode == "단일 문제 생성":
-            problem_type = st.selectbox("문제 유형", ["선택형", "단답형"])
+        if mode == "울트라 하드 문항 생성":
+            st.subheader("🔥 울트라 하드 문항 생성")
+            st.warning("⚠️ 울트라 하드 문항도 2015 개정 교육과정을 철저히 준수합니다")
             
-            topic = st.selectbox("주제", ["자동 선택"] + MATH_TOPICS)
-            if topic == "자동 선택":
-                topic = None
+            # 울트라 하드 옵션
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                fusion_type = st.selectbox(
+                    "융합 유형",
+                    ["수학1+수학2", "미적분"],
+                    help="수학1+수학2: 두 과목 개념 융합\n미적분: 미적분 단독 최고난도"
+                )
+            
+            with col2:
+                pattern = st.selectbox(
+                    "울트라 하드 패턴",
+                    ["항등식", "명제", "경우의수", "최적화", 
+                     "초월함수 미분가능성", "극한과 연속성", "합성함수 분석"],
+                    help="문제의 핵심 난도 요소"
+                )
+            
+            problem_type = st.radio(
+                "문제 유형",
+                ["선택형 (14번, 15번)", "단답형 (21번, 22번, 29번, 30번)"],
+                horizontal=True
+            )
+            problem_type = problem_type.split()[0]  # "선택형" 또는 "단답형"만 추출
+            
+            # 울트라 하드 가이드라인
+            with st.expander("🎯 울트라 하드 문항 특징"):
+                st.info("""
+                **필수 요소:**
+                • 항등식의 복잡한 해석
+                • 여러 단원의 개념 융합
+                • 어려운 명제의 참/거짓 판별
+                • 다단계 사고 과정 요구
+                • 경우의 수 분할 또는 조건 분석
+                
+                **예상 소요 시간:** 10-15분
+                **배점:** 4점 고정
+                """)
+            
+            if st.button("🔥 울트라 하드 문항 생성", type="primary"):
+                with st.spinner("최고 난도 문제를 생성하는 중... (약 10초 소요)"):
+                    if ultra_hard_generator:
+                        try:
+                            problem = ultra_hard_generator.generate_ultra_hard_problem(
+                                fusion_type=fusion_type,
+                                pattern=pattern,
+                                problem_type=problem_type
+                            )
+                        except Exception as e:
+                            error_msg = str(e)
+                            if "quota" in error_msg.lower() or "429" in error_msg:
+                                st.error("""⚠️ **Gemini API 일일 할당량 초과**
+                                
+                                무료 티어의 하루 50개 요청 제한에 도달했습니다.
+                                
+                                **해결 방법:**
+                                1. 내일 다시 시도 (할당량이 초기화됩니다)
+                                2. [Google AI Studio](https://aistudio.google.com/)에서 유료 플랜으로 업그레이드
+                                3. .env 파일에 OPENAI_API_KEY 추가하여 OpenAI 사용
+                                """)
+                            else:
+                                st.error(f"문제 생성 실패: {error_msg}")
+                            problem = None
+                    else:
+                        st.error("울트라 하드 문항 생성기를 사용할 수 없습니다")
+                        problem = None
+                    
+                    if problem:
+                        # LaTeX 렌더링 적용
+                        problem = latex_renderer.process_problem_text(problem)
+                        st.session_state['current_problem'] = problem
+        
+        elif mode == "단일 문제 생성":
+            st.subheader("📚 2015 개정 교육과정 기준")
+            
+            # 과목 선택
+            subject = st.selectbox(
+                "과목 선택",
+                ["수학1", "수학2", "미적분"],
+                help="2015 개정 교육과정 수학 과목"
+            )
+            
+            # 선택된 과목의 단원 표시
+            chapters = list(CURRICULUM_2015[subject]["chapters"].keys())
+            chapter = st.selectbox("단원 선택", chapters)
+            
+            # 소단원 선택 (선택사항)
+            chapter_data = CURRICULUM_2015[subject]["chapters"][chapter]
+            sections = chapter_data.get("sections", [])
+            if sections:
+                section = st.selectbox("세부 주제", ["전체"] + sections)
+                if section == "전체":
+                    section = None
+            else:
+                section = None
+            
+            problem_type = st.selectbox("문제 유형", ["선택형", "단답형"])
             
             difficulty = st.selectbox(
                 "난이도", 
-                ["하", "중", "상", "킬러"],
-                help="킬러: 초고난도 문항 (항등식, 다단원 융합, 부등식 활용)"
+                ["하", "중", "상"],
+                help="모든 난이도는 2015 개정 교육과정 범위 내에서 출제"
             )
+            
+            # 교육과정 제한사항 표시
+            with st.expander("📌 교육과정 가이드라인"):
+                limits = chapter_data.get("curriculum_limits", [])
+                if limits:
+                    st.warning("주의사항:")
+                    for limit in limits:
+                        st.write(f"- {limit}")
+                        
+                guidelines = PROBLEM_GUIDELINES.get(subject, {}).get(
+                    chapter.replace(" ", "_"), {}
+                ).get(difficulty, "")
+                if guidelines:
+                    st.info(f"{difficulty} 난이도 가이드: {guidelines}")
             
             points = st.selectbox("배점", 
                                 [2, 3, 4] if problem_type == "선택형" else [3, 4])
             
             if st.button("🚀 문제 생성", type="primary"):
-                with st.spinner("문제를 생성하는 중..."):
-                    problem = generator.generate_problem(
-                        problem_type=problem_type,
-                        topic=topic,
-                        difficulty=difficulty,
-                        points=points
-                    )
+                with st.spinner("교육과정 준수 문제를 생성하는 중..."):
+                    if generator_2015:
+                        problem = generator_2015.generate_curriculum_problem(
+                            subject=subject,
+                            chapter=chapter,
+                            section=section,
+                            difficulty=difficulty,
+                            problem_type=problem_type
+                        )
+                    else:
+                        # 폴백: 기본 생성기 사용
+                        problem = generator.generate_problem(
+                            subject=subject,
+                            topic=section or chapter,
+                            difficulty=difficulty,
+                            problem_type=problem_type,
+                            points=points
+                        )
                     # LaTeX 렌더링 적용
                     problem = latex_renderer.process_problem_text(problem)
                     st.session_state['current_problem'] = problem
         
-        else:  
-            num_problems = st.slider("문제 수", 10, 30, 20)
+        else:  # 모의고사 생성
+            st.subheader("📝 모의고사 설정")
             
-            include_killer = st.checkbox(
-                "킬러 문제 포함", 
-                value=False,
-                help="초고난도 킬러 문항 1-2개를 포함합니다"
+            exam_type = st.radio(
+                "시험 유형",
+                ["통합형", "단원별"],
+                help="통합형: 모든 과목 포함, 단원별: 특정 과목/단원만"
             )
             
+            if exam_type == "단원별":
+                exam_subject = st.selectbox(
+                    "과목 선택",
+                    ["수학1", "수학2", "미적분"]
+                )
+                exam_chapters = list(CURRICULUM_2015[exam_subject]["chapters"].keys())
+                exam_chapter = st.selectbox("단원 선택", exam_chapters)
+            
+            num_problems = st.slider("문제 수", 10, 30, 20)
+            
+            # 난이도 분포 설정
+            st.write("난이도 분포")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                easy_pct = st.slider("하 (%)", 0, 100, 30)
+            with col2:
+                medium_pct = st.slider("중 (%)", 0, 100, 50)
+            with col3:
+                hard_pct = 100 - easy_pct - medium_pct
+                st.metric("상 (%)", hard_pct)
+            
             if st.button("📝 모의고사 생성", type="primary"):
-                with st.spinner(f"{num_problems}개의 문제를 생성하는 중..."):
-                    problems = generator.generate_exam_set(
-                        num_problems=num_problems,
-                        include_killer=include_killer
-                    )
+                with st.spinner(f"{num_problems}개의 교육과정 준수 문제를 생성하는 중..."):
+                    if exam_type == "단원별" and generator_2015:
+                        problems = generator_2015.generate_unit_test(
+                            subject=exam_subject,
+                            chapter=exam_chapter,
+                            num_problems=num_problems
+                        )
+                    else:
+                        # 통합형 모의고사
+                        problems = generator.generate_exam(
+                            exam_type="공통",
+                            num_problems=num_problems
+                        )
                     # 모든 문제에 LaTeX 렌더링 적용
                     problems = [latex_renderer.process_problem_text(p) for p in problems]
                     st.session_state['exam_problems'] = problems
     
-    if mode == "단일 문제 생성" and 'current_problem' in st.session_state:
+    if (mode == "단일 문제 생성" or mode == "울트라 하드 문항 생성") and 'current_problem' in st.session_state:
         problem = st.session_state['current_problem']
         
         if 'error' in problem:
@@ -213,10 +434,21 @@ def main():
                     solution_text = problem.get('solution', '풀이를 불러올 수 없습니다.')
                     st.markdown(solution_text)
                 
-                if problem.get('key_concepts'):
+                if problem.get('key_concepts') or problem.get('curriculum_concepts'):
                     with st.expander("핵심 개념"):
-                        for concept in problem.get('key_concepts', []):
-                            st.markdown(f"- {concept}")
+                        # 교육과정 핵심 개념 표시
+                        curriculum_concepts = problem.get('curriculum_concepts', [])
+                        if curriculum_concepts:
+                            st.write("📖 교육과정 핵심 개념:")
+                            for concept in curriculum_concepts:
+                                st.markdown(f"- {concept}")
+                        
+                        # 기타 핵심 개념
+                        key_concepts = problem.get('key_concepts', [])
+                        if key_concepts:
+                            st.write("💡 관련 개념:")
+                            for concept in key_concepts:
+                                st.markdown(f"- {concept}")
                 
                 # 추가 품질 정보 표시
                 if problem.get('difficulty_rationale'):
@@ -355,6 +587,7 @@ def main():
                         exam_info = {
                             "title": "대학수학능력시험 모의고사",
                             "subject": "수학 영역",
+                            "exam_type": "공통+선택",  # 2015 개정 교육과정 체제
                             "date": datetime.now().strftime("%Y년 %m월 %d일"),
                             "time": "100분",
                             "total_questions": len(problems)

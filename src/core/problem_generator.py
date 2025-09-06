@@ -10,7 +10,6 @@ if __name__ == "__main__" or "core" in __name__:
 
 from core.config import GEMINI_API_KEY, PROBLEM_TYPES, MATH_TOPICS, SPECIALIZED_PROBLEM_TYPES
 from generators.graph_generator import MathGraphGenerator
-from validators.quality_validator import QualityEnhancedGenerator
 from validators.error_fixes import error_fixer, problem_validator
 from generators.ultra_hard_problems import UltraHardProblemGenerator, ULTRA_HARD_CATEGORIES
 import re
@@ -24,26 +23,13 @@ logger = logging.getLogger(__name__)
 genai.configure(api_key=GEMINI_API_KEY)
 
 class KSATMathGenerator:
-    def __init__(self, enable_quality_enhancement: bool = True):
+    def __init__(self):
         self.model = genai.GenerativeModel('gemini-2.5-pro')
         self.fallback_model = genai.GenerativeModel('gemini-2.5-flash')  # 더 관대한 제한의 백업 모델
         self.graph_generator = MathGraphGenerator()
         self.last_request_time = 0
         self.min_request_interval = 30  # 30초 간격으로 요청 (free tier 제한 고려)
         self.use_fallback = False
-        
-        # 품질 강화 시스템
-        self.enable_quality_enhancement = enable_quality_enhancement
-        if enable_quality_enhancement:
-            try:
-                self.quality_enhancer = QualityEnhancedGenerator()
-                logger.info("품질 강화 시스템 활성화됨")
-            except Exception as e:
-                logger.warning(f"품질 강화 시스템 초기화 실패, 기본 모드로 동작: {e}")
-                self.enable_quality_enhancement = False
-                self.quality_enhancer = None
-        else:
-            self.quality_enhancer = None
         
         # 초고난도 문제 생성기
         self.ultra_hard_generator = UltraHardProblemGenerator()
@@ -93,18 +79,6 @@ class KSATMathGenerator:
                     if graph_image:
                         problem_data["graph"] = graph_image
                     
-                    # 품질 강화 처리
-                    if self.enable_quality_enhancement and self.quality_enhancer:
-                        try:
-                            logger.info("품질 강화 처리 시작...")
-                            enhanced_problem = self.quality_enhancer.enhance_problem_quality(problem_data)
-                            logger.info(f"품질 점수: {enhanced_problem.get('quality_score', 'N/A')}")
-                            return enhanced_problem
-                        except Exception as e:
-                            logger.error(f"품질 강화 처리 실패: {e}")
-                            # 품질 강화 실패 시 기본 문제 데이터 반환
-                            problem_data["quality_enhancement_error"] = str(e)
-                            return problem_data
                     
                     return problem_data
                     
@@ -344,17 +318,22 @@ class KSATMathGenerator:
 }}
 
 【선택형 문제 필수 규칙】
-1. **choices 배열**: 반드시 5개의 구체적인 수치나 수식
+1. **정답 유일성 보장** (최우선 규칙):
+   - 문제의 조건을 정밀하게 설계하여 반드시 단 하나의 정답만 존재하도록 함
+   - 모호한 표현이나 다중 해석 가능한 조건 절대 금지
+   - 필요시 "단," "여기서," "이때," 등의 제한 조건 명시적 추가
+   - 변수의 범위, 정의역, 조건을 명확히 제시
+2. **choices 배열**: 반드시 5개의 구체적인 수치나 수식
    - 예시: ["12", "-3", "2√5", "7/3", "0"]
    - 모든 선택지는 계산 가능한 값이어야 함
    - "없음", "모두", "알 수 없음" 같은 추상적 답변 금지
-2. **오답 설계 전략**:
+3. **오답 설계 전략**:
    - 오답1: 가장 흔한 계산 실수 결과
    - 오답2: 개념을 잘못 이해했을 때의 결과
    - 오답3: 문제를 부분적으로만 해결했을 때의 결과
    - 오답4: 공식을 잘못 적용했을 때의 결과
-3. **정답**: choices 배열의 요소 중 하나를 정확히 복사
-4. **변별력**: 각 선택지가 서로 충분히 구별되는 값
+4. **정답**: choices 배열의 요소 중 하나를 정확히 복사
+5. **변별력**: 각 선택지가 서로 충분히 구별되는 값
 """
         
         # 난이도에 따른 추가 지침
@@ -645,25 +624,11 @@ class KSATMathGenerator:
     
     def get_quality_statistics(self) -> Dict:
         """품질 통계 조회"""
-        if not self.enable_quality_enhancement or not self.quality_enhancer:
-            return {"error": "품질 강화 시스템이 비활성화되어 있습니다."}
-        
-        try:
-            return self.quality_enhancer.database.get_problem_statistics()
-        except Exception as e:
-            logger.error(f"품질 통계 조회 실패: {e}")
-            return {"error": str(e)}
+        return {"error": "품질 강화 시스템이 비활성화되어 있습니다."}
     
     def search_similar_problems(self, question: str, limit: int = 5) -> List[Dict]:
         """유사 문제 검색"""
-        if not self.enable_quality_enhancement or not self.quality_enhancer:
-            return []
-        
-        try:
-            return self.quality_enhancer.database.check_duplicate(question, 0.6)[:limit]
-        except Exception as e:
-            logger.error(f"유사 문제 검색 실패: {e}")
-            return []
+        return []
     
     def regenerate_with_quality_check(self,
                                     problem_type: str = "선택형",
@@ -774,15 +739,6 @@ class KSATMathGenerator:
                 "specialized_subtopic": specialized_subtopic
             })
             
-            # 품질 강화 처리
-            if self.enable_quality_enhancement and self.quality_enhancer:
-                try:
-                    enhanced_problem = self.quality_enhancer.enhance_problem_quality(problem_data)
-                    return enhanced_problem
-                except Exception as e:
-                    logger.error(f"품질 강화 처리 실패: {e}")
-                    problem_data["quality_enhancement_error"] = str(e)
-                    return problem_data
             
             return problem_data
             
@@ -877,15 +833,6 @@ class KSATMathGenerator:
                 "specialized_subtopic": specialized_subtopic
             })
             
-            # 품질 강화 처리
-            if self.enable_quality_enhancement and self.quality_enhancer:
-                try:
-                    enhanced_problem = self.quality_enhancer.enhance_problem_quality(problem_data)
-                    return enhanced_problem
-                except Exception as e:
-                    logger.error(f"품질 강화 처리 실패: {e}")
-                    problem_data["quality_enhancement_error"] = str(e)
-                    return problem_data
             
             return problem_data
             
@@ -1005,25 +952,6 @@ class KSATMathGenerator:
             # 초고난도 난이도 분석
             ultra_analysis = self.ultra_hard_generator.analyze_ultra_difficulty(problem_data)
             problem_data["ultra_difficulty_analysis"] = ultra_analysis
-            
-            # 품질 강화 처리
-            if self.enable_quality_enhancement and self.quality_enhancer:
-                try:
-                    enhanced_problem = self.quality_enhancer.enhance_problem_quality(problem_data)
-                    
-                    # 초고난도 기준 미달 시 재생성
-                    quality_score = enhanced_problem.get('quality_score', 0)
-                    ultra_score = ultra_analysis.get('final_score', 0)
-                    
-                    if quality_score < 80 or ultra_score < category_info['min_score']:
-                        logger.warning(f"초고난도 기준 미달 (품질: {quality_score}, 난이도: {ultra_score})")
-                        enhanced_problem["warning"] = "초고난도 기준을 완전히 충족하지 못했습니다."
-                    
-                    return enhanced_problem
-                    
-                except Exception as e:
-                    logger.error(f"품질 강화 처리 실패: {e}")
-                    problem_data["quality_enhancement_error"] = str(e)
             
             return problem_data
             

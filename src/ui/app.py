@@ -12,9 +12,7 @@ from typing import Dict, Any, List, Optional
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from src.retriever import ProblemSearcher
 from src.generator import ProblemGenerator
-from src.solver import GemmaSolver, SolutionFormatter
 from src.utils.pdf_generator import PDFGenerator
 from src.utils.config import Config
 from src.core.config import MATH_TOPICS, PROBLEM_TYPES
@@ -22,6 +20,7 @@ from src.core.curriculum_2015 import CURRICULUM_2015, get_curriculum_info, PROBL
 from src.generator.problem_generator_2015 import ProblemGenerator2015
 from src.generator.ultra_hard_generator import UltraHardGenerator
 from src.generator.gemini_client_v2 import GeminiClientV2
+from src.generator.solution_generator import get_solution_generator
 from src.generators.latex_renderer import LaTeXRenderer
 
 st.set_page_config(
@@ -72,30 +71,21 @@ def init_pdf_generator():
         from generators.pdf_generator import KSATPDFGenerator
         return KSATPDFGenerator()
 
-@st.cache_resource
-def init_searcher():
-    """검색 모듈 초기화"""
-    try:
-        index_path = os.getenv("INDEX_PATH", "data/index")
-        if Path(index_path).exists():
-            return ProblemSearcher(index_path=index_path)
-    except Exception as e:
-        st.warning(f"검색 모듈 초기화 실패: {e}")
-    return None
 
 @st.cache_resource
 def init_latex_renderer():
     """LaTeX 렌더러 초기화"""
     return LaTeXRenderer()
 
-@st.cache_resource  
-def init_solver():
-    """풀이 모듈 초기화"""
+@st.cache_resource
+def init_solution_generator():
+    """풀이 생성기 초기화"""
     try:
-        return GemmaSolver()
+        return get_solution_generator()
     except Exception as e:
-        st.warning(f"Solver 초기화 실패: {e}")
-    return None
+        st.warning(f"풀이 생성기 초기화 실패: {e}")
+        return None
+
 
 def main():
     st.title("🎓 대학수학능력시험 수학 문제 생성기")
@@ -171,6 +161,7 @@ def main():
     ultra_hard_generator = init_ultra_hard_generator()
     pdf_generator = init_pdf_generator()
     latex_renderer = init_latex_renderer()
+    solution_generator = init_solution_generator()
     
     with st.sidebar:
         st.header("⚙️ 문제 설정")
@@ -190,17 +181,38 @@ def main():
             
             with col1:
                 fusion_type = st.selectbox(
-                    "융합 유형",
-                    ["수학1+수학2", "미적분"],
-                    help="수학1+수학2: 두 과목 개념 융합\n미적분: 미적분 단독 최고난도"
+                    "출제 유형",
+                    ["수학1", "수학2", "수학1+수학2", "미적분"],
+                    help="수학1: 지수/로그/삼각/수열\n수학2: 극한/미분/적분\n수학1+수학2: 융합\n미적분: 초월함수 포함"
                 )
             
             with col2:
+                # 과목별 패턴 선택
+                if fusion_type == "수학1":
+                    pattern_options = [
+                        "조건충족형", "지수로그 방정식", "삼각함수 극값", 
+                        "수열 점화식", "복합개념", "파라미터"
+                    ]
+                elif fusion_type == "수학2":
+                    pattern_options = [
+                        "조건충족형", "불연속/미분불가능", "극값개수",
+                        "적분조건", "최적화", "복합개념"
+                    ]
+                elif fusion_type == "미적분":
+                    pattern_options = [
+                        "초월함수 미분가능성", "매개변수미분", "음함수미분",
+                        "역함수미분", "급수수렴", "적분응용", "극한연속성"
+                    ]
+                else:  # 수학1+수학2
+                    pattern_options = [
+                        "항등식", "명제", "경우의수", "최적화",
+                        "융합문제", "조건충족형"
+                    ]
+                
                 pattern = st.selectbox(
-                    "울트라 하드 패턴",
-                    ["항등식", "명제", "경우의수", "최적화", 
-                     "초월함수 미분가능성", "극한과 연속성", "합성함수 분석"],
-                    help="문제의 핵심 난도 요소"
+                    "문제 패턴",
+                    pattern_options,
+                    help="선택한 과목에 맞는 문제 패턴"
                 )
             
             problem_type = st.radio(
@@ -212,16 +224,45 @@ def main():
             
             # 울트라 하드 가이드라인
             with st.expander("🎯 울트라 하드 문항 특징"):
-                st.info("""
-                **필수 요소:**
-                • 항등식의 복잡한 해석
-                • 여러 단원의 개념 융합
-                • 어려운 명제의 참/거짓 판별
-                • 다단계 사고 과정 요구
-                • 경우의 수 분할 또는 조건 분석
+                if fusion_type == "수학1":
+                    st.info("""
+                    **수학1 단독 초고난도 특징:**
+                    • 지수/로그 복합 방정식과 부등식
+                    • 삼각함수의 고급 항등식과 변환
+                    • 점화식과 수학적 귀납법의 응용
+                    • 수열의 수렴 조건과 극한
+                    """)
+                elif fusion_type == "수학2":
+                    st.info("""
+                    **수학2 단독 초고난도 특징:**
+                    • 불연속점/미분불가능점 개수 분석
+                    • 매개변수 k에 따른 해의 개수 변화
+                    • 극값이 존재하는 x의 개수
+                    • 적분 조건 문제 (넓이, 평균값)
+                    """)
+                elif fusion_type == "미적분":
+                    st.info("""
+                    **미적분 초고난도 특징:**
+                    • 초월함수 e^x, ln(x) 활용
+                    • 매개변수/음함수/역함수 미분
+                    • 급수의 수렴성 판별
+                    • 치환적분과 부분적분의 복합
+                    """)
+                else:
+                    st.info("""
+                    **수학1+수학2 융합 특징:**
+                    • 지수/로그와 미분 (e^x, ln(x) 제외)
+                    • 삼각함수와 극한/연속
+                    • 수열과 함수 극한의 관계
+                    • 여러 단원의 복합 개념
+                    """)
                 
-                **예상 소요 시간:** 10-15분
-                **배점:** 4점 고정
+                st.warning("""
+                **공통 특징:**
+                • 단순 계산이 아닌 조건 해석과 분석
+                • 다단계 사고 과정 필수
+                • 예상 소요 시간: 10-15분
+                • 배점: 4점 고정
                 """)
             
             if st.button("🔥 울트라 하드 문항 생성", type="primary"):
@@ -431,8 +472,50 @@ def main():
                         st.success(f"**정답:** {answer_text}")
                 
                 with st.expander("풀이 보기"):
-                    solution_text = problem.get('solution', '풀이를 불러올 수 없습니다.')
-                    st.markdown(solution_text)
+                    solution_text = problem.get('solution', '')
+                    
+                    # 풀이가 없거나 짧은 경우 Gemini API로 생성
+                    if not solution_text or len(solution_text) < 50:
+                        if solution_generator:
+                            with st.spinner("풀이를 생성하는 중..."):
+                                solution_result = solution_generator.generate_solution(
+                                    question=problem.get('question', ''),
+                                    answer=problem.get('answer', ''),
+                                    problem_type=problem.get('type', '선택형'),
+                                    options=problem.get('choices', []),
+                                    subject=problem.get('subject', ''),
+                                    topic=problem.get('topic', '')
+                                )
+                                solution_text = solution_result.get('solution', '풀이 생성 실패')
+                                
+                                # 생성된 풀이를 문제 데이터에 저장 (캐시)
+                                problem['solution'] = solution_text
+                                
+                                # 핵심 개념도 추가
+                                if 'key_concepts' in solution_result:
+                                    problem['key_concepts'] = solution_result['key_concepts']
+                        else:
+                            solution_text = "풀이 생성기를 사용할 수 없습니다."
+                    
+                    # 풀이 텍스트 처리 및 표시
+                    if solution_text:
+                        # 포맷팅 함수 사용
+                        if solution_generator:
+                            solution_text = solution_generator.format_solution_for_display(solution_text)
+                        else:
+                            # 기본 이스케이프 처리
+                            solution_text = solution_text.replace('\\n', '\n')
+                            solution_text = solution_text.replace('\\t', '  ')
+                            solution_text = solution_text.replace('\\\'', '\'')
+                            solution_text = solution_text.replace('\\"', '"')
+                        
+                        # 수식이 포함된 경우 마크다운으로 표시
+                        if '$' in solution_text or '\\(' in solution_text:
+                            st.markdown(solution_text)
+                        else:
+                            st.text(solution_text)
+                    else:
+                        st.info("풀이가 제공되지 않았습니다.")
                 
                 if problem.get('key_concepts') or problem.get('curriculum_concepts'):
                     with st.expander("핵심 개념"):
@@ -530,8 +613,42 @@ def main():
             with st.expander("정답 및 풀이"):
                 answer_text = selected.get('answer', 'N/A')
                 st.success(f"정답: {answer_text}")
-                solution_text = selected.get('solution', '풀이를 불러올 수 없습니다.')
-                st.markdown(solution_text)
+                solution_text = selected.get('solution', '')
+                
+                # 풀이가 없거나 너무 짧은 경우 자동 생성
+                if not solution_text or len(solution_text) < 50:
+                    if solution_generator:
+                        with st.spinner("풀이를 생성하는 중..."):
+                            solution_result = solution_generator.generate_solution(
+                                question=selected.get('question', ''),
+                                answer=answer_text,
+                                problem_type=selected.get('problem_type', '선택형'),
+                                options=selected.get('choices', []),
+                                subject=selected.get('subject', ''),
+                                topic=selected.get('topic', '')
+                            )
+                            if "error" not in solution_result:
+                                solution_text = solution_result.get("solution", "풀이 생성 실패")
+                            else:
+                                solution_text = "풀이 생성 중 오류가 발생했습니다."
+                    else:
+                        solution_text = "풀이 생성기가 초기화되지 않았습니다."
+                
+                # 풀이 텍스트 처리
+                if solution_text and solution_text not in ["풀이 생성 실패", "풀이 생성 중 오류가 발생했습니다.", "풀이 생성기가 초기화되지 않았습니다."]:
+                    # JSON 이스케이프 문자 처리
+                    solution_text = solution_text.replace('\\n', '\n')
+                    solution_text = solution_text.replace('\\t', '  ')
+                    solution_text = solution_text.replace('\\\'', '\'')
+                    solution_text = solution_text.replace('\\"', '"')
+                    
+                    # 수식 표현을 위한 마크다운 포맷팅
+                    if '$' in solution_text or '\\(' in solution_text:
+                        st.markdown(solution_text)
+                    else:
+                        st.text(solution_text)
+                else:
+                    st.info(solution_text if solution_text else "풀이가 제공되지 않았습니다.")
         
         with tab3:
             df_data = []
